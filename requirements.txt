@@ -74,7 +74,6 @@ jupyterlab==4.3.6
 jupyterlab_pygments==0.3.0
 jupyterlab_server==2.27.3
 jupyterlab_widgets==3.0.13
-kaleido==0.1.0.post1
 keyring==25.6.0
 kiwisolver==1.4.8
 linkify-it-py==2.0.3

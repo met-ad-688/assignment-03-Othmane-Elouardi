@@ -1,23 +1,28 @@
 ---
-title: Assignment 03
-author:
-  - name: Norah Jones
+title: "Assignment 3"
+author: 
+  - name: "Othmane Elouardi"
     affiliations:
       - id: bu
-        name: Boston University
-        city: Boston
-        state: MA
+        name: "Boston University"
+        city: "Boston"
+        state: "MA"
+date: today
 number-sections: true
-date: '2024-11-21'
+
 format:
   html:
-    theme: cerulean
+    theme: [flatly, styles.scss]   # custom theme
     toc: true
-    toc-depth: 2
-date-modified: today
-date-format: long
+    toc-depth: 3
+    code-copy: true
+    code-overflow: wrap
+    fig-align: center
+    df-print: paged
+
 execute:
-  echo: false
-  eval: false
-  freeze: auto
+  echo: true        
+  warning: false    
+  message: false    
+  freeze: auto     
 ---
