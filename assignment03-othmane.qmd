@@ -1,28 +1,89 @@
 ---
 title: "Assignment 3"
+subtitle: "Big Data Visualization on Scale"
 author: 
   - name: "Othmane Elouardi"
-    affiliations:
-      - id: bu
-        name: "Boston University"
-        city: "Boston"
-        state: "MA"
+    affiliation: "Boston University"
 date: today
 number-sections: true
-
 format:
   html:
-    theme: [flatly, styles.scss]   # custom theme
+    theme: [lux, styles.scss]
     toc: true
     toc-depth: 3
     code-copy: true
     code-overflow: wrap
-    fig-align: center
+    code-fold: true
+    highlight-style: github
+    title-block-style: default
+    title-block-banner: true
     df-print: paged
-
 execute:
-  echo: true        
-  warning: false    
-  message: false    
-  freeze: auto     
+  echo: true
+  warning: false
+  message: false
+  freeze: auto
 ---
+
+
+# Load the Dataset
+
+&emsp;&emsp;I used **PySpark** to bring the `lightcast_data.csv` file into a Spark DataFrame. After loading the data, I checked the schema to confirm that the column names were correct and could be used reliably in the later analysis. For each visualization, I customized the color schemes, fonts, and styles rather than relying on defaults, and I added a short explanation under each figure to highlight the main insights.  
+
+---
+
+## Checklist - Steps
+
+&emsp;• Initialized a Spark session  
+&emsp;• Loaded the `lightcast_data.csv` file into a DataFrame  
+&emsp;• Displayed the schema and a sample of the dataset as a quick check  
+
+
+
+```python
+# Imports
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+from pyspark.sql import SparkSession
+import re
+import numpy as np
+import plotly.graph_objects as go
+from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when
+from pyspark.sql import functions as F
+from pyspark.sql.functions import col, monotonically_increasing_id
+```
+
+```python
+# Spark session
+spark = (
+    SparkSession.builder
+    .appName("LightcastData")
+    .getOrCreate()
+)
+
+# Load the CSV
+csv_path = "data/lightcast_job_postings.csv"  # adjust if your file lives elsewhere
+
+df = (
+    spark.read
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .option("multiLine", "true")
+        .option("escape", "\"")
+        .csv(csv_path)
+)
+
+# Temp view for SQL
+df.createOrReplaceTempView("job_postings")
+
+# Quick diagnostics 
+#print("\n--- Spark & Data Quick Check ---")
+#print("Spark version:", spark.version)
+#print("Row count (sampled below):")
+#df.show(5, truncate=False)    
+# df.printSchema()            
+```
+
+
+
