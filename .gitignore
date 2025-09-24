@@ -172,3 +172,26 @@ cython_debug/
 lightcast_job_postings.csv
 lightcast_job_postings.csv
 quarto-linux-amd64.deb
+
+
+# Local environment
+.venv/
+__pycache__/
+
+# Quarto build outputs
+_site/
+*.html
+*.pdf
+*.docx
+*.pptx
+*.tex
+
+# Data files (keep datasets out of repo)
+data/
+*.csv
+*.tsv
+*.json
+*.parquet
+
+# Installers
+*.deb
