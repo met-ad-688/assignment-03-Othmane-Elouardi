@@ -171,3 +171,4 @@ cython_debug/
 .pypirc
 lightcast_job_postings.csv
 lightcast_job_postings.csv
+quarto-linux-amd64.deb
