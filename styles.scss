@@ -1,0 +1,16 @@
+/*-- scss:defaults --*/
+$font-family-sans-serif: "Helvetica Neue", Helvetica, Arial, sans-serif;
+$body-color: #222;
+$primary: #ec7424;  // custom accent color
+
+/*-- scss:rules --*/
+h1, h2, h3 { letter-spacing: 0.2px; }
+
+.figure-caption {
+  font-style: italic;
+  color: #666;
+}
+
+/* optional polish */
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
