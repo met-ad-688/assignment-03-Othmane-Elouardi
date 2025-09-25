@@ -344,3 +344,120 @@ fig.update_layout(width=1800, height=800, margin=dict(l=40, r=40, t=90, b=320))
 fig.update_xaxes(tickangle=45)
 display(HTML(fig.to_html(include_plotlyjs="cdn", full_html=False)))
 
+
+##################################################################################################################
+
+
+# Salary by Education Level
+
+
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Experience vs Salary by Education Level"
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import DoubleType
+from pyspark.sql.functions import col
+from IPython.display import HTML, display
+import plotly.express as px
+import numpy as np
+
+# --- Spark / source df
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+    df = spark.table("job_postings_clean")
+else:
+    df = (
+        spark.read
+        .option("header", "true").option("inferSchema", "true")
+        .option("multiLine", "true").option("escape", "\"")
+        .csv("data/lightcast_job_postings.csv")
+    )
+
+# --- Pick experience column robustly
+exp_candidates = ["MAX_YEARS_EXPERIENCE", "YEARS_EXPERIENCE",
+                  "YEARS_OF_EXPERIENCE", "MIN_YEARS_EXPERIENCE"]
+exp_col = next((c for c in exp_candidates if c in df.columns), None)
+if exp_col is None:
+    raise ValueError(f"No experience column found. Tried: {exp_candidates}")
+
+# --- Pick salary column robustly (prefer your computed Average_Salary)
+if "Average_Salary" in df.columns:
+    sal_col = "Average_Salary"
+else:
+    if "SALARY_FROM" in df.columns and "SALARY_TO" in df.columns:
+        df = df.withColumn(
+            "Average_Salary",
+            (F.col("SALARY_FROM").cast(DoubleType()) + F.col("SALARY_TO").cast(DoubleType())) / 2.0
+        )
+        sal_col = "Average_Salary"
+    elif "SALARY" in df.columns:
+        sal_col = "SALARY"
+    else:
+        raise ValueError("No salary column found (looked for Average_Salary, SALARY_FROM/TO, SALARY).")
+
+# Ensure salary is numeric
+df = df.withColumn(sal_col, col(sal_col).cast(DoubleType()))
+
+# --- Education grouping
+edu_src = "EDUCATION_LEVELS_NAME" if "EDUCATION_LEVELS_NAME" in df.columns else None
+if edu_src is None:
+    raise ValueError("EDUCATION_LEVELS_NAME column not found.")
+
+df = df.withColumn(
+    "EDU_GROUP",
+    F.when(F.lower(F.col(edu_src)).contains("phd"), "PhD")
+     .when(F.lower(F.col(edu_src)).contains("master"), "Master’s")
+     .when(F.lower(F.col(edu_src)).contains("bachelor"), "Bachelor")
+     .otherwise("Associate or Lower")
+)
+
+# --- Optional: choose a hover occupation/title column if available
+occ_candidates = ["OCCUPATION_NAME", "JOB_TITLE_NAME", "JOB_TITLE", "TITLE_RAW",
+                  "ONET_NAME", "OCC_TITLE"]
+occ_col = next((c for c in occ_candidates if c in df.columns), None)
+
+# --- Build pandas dataframe for Plotly
+cols = [exp_col, sal_col, "EDU_GROUP"] + ([occ_col] if occ_col else [])
+pdf = (
+    df.select(*cols)
+      .where(col(sal_col).isNotNull() & (col(sal_col) > 0) & col(exp_col).isNotNull())
+      .toPandas()
+)
+
+# Jitter experience a bit to reduce overplotting
+rng = np.random.default_rng(42)
+pdf["exp_jitter"] = pdf[exp_col].astype(float) + rng.uniform(-0.15, 0.15, size=len(pdf))
+
+# Rename for pretty axes
+pdf = pdf.rename(columns={sal_col: "Average Salary (USD)",
+                          "exp_jitter": "Years of Experience"})
+
+# --- Plot
+hover = [occ_col] if occ_col else None
+fig = px.scatter(
+    pdf,
+    x="Years of Experience",
+    y="Average Salary (USD)",
+    color="EDU_GROUP",
+    hover_data=hover,
+    opacity=0.7,
+    title="Experience vs Salary by Education Level"
+)
+
+fig.update_layout(
+    xaxis_title="Years of Experience",
+    yaxis_title="Average Salary (USD)",
+    legend_title="Education Group",
+    width=1600, height=800,
+    margin=dict(l=40, r=40, t=80, b=120)
+)
+
+from IPython.display import HTML
+display(HTML(fig.to_html(include_plotlyjs="cdn", full_html=False)))
+
