@@ -32,7 +32,7 @@ execute:
 
 ---
 
-## Checklist - Steps
+## Loading Dataset With PySpark
 
 &emsp;• Initialized a Spark session  
 &emsp;• Loaded the `lightcast_data.csv` file into a DataFrame  
@@ -63,7 +63,7 @@ spark = (
 )
 
 # Load the CSV
-csv_path = "data/lightcast_job_postings.csv"  # adjust if your file lives elsewhere
+csv_path = "data/lightcast_job_postings.csv"
 
 df = (
     spark.read
@@ -84,6 +84,144 @@ df.createOrReplaceTempView("job_postings")
 #df.show(5, truncate=False)    
 # df.printSchema()            
 ```
+
+
+
+## DATA CLEANING
+
+In this section, we performed several cleaning steps to ensure the dataset is consistent and ready for analysis:
+
+- Cast salary/experience columns to numeric  
+- Compute medians (via `approxQuantile`) for imputation  
+- Create `Average_Salary` with sensible fallbacks  
+- Clean `EDUCATION_LEVELS_NAME` (remove newlines)  
+- Derive a simplified `REMOTE_GROUP` (`Remote`, `Hybrid`, `Onsite`)  
+
+---
+
+### Casting
+
+```python
+# Cast target columns to numeric (DoubleType)
+from pyspark.sql.types import DoubleType
+
+numeric_casts = {
+    "SALARY_FROM": DoubleType(),
+    "SALARY_TO":   DoubleType(),
+    "SALARY":      DoubleType(),
+    "MIN_YEARS_EXPERIENCE": DoubleType(),
+    "MAX_YEARS_EXPERIENCE": DoubleType()
+}
+
+df = df.select(*[
+    F.col(c).cast(numeric_casts[c]).alias(c) if c in numeric_casts else F.col(c)
+    for c in df.columns
+])
+```
+
+### Medians
+
+```python
+# Helper to compute median with approxQuantile
+def median_of(colname):
+    vals = df.filter(F.col(colname).isNotNull()) \
+             .approxQuantile(colname, [0.5], 0.001)
+    return float(vals[0]) if vals else None
+
+median_from   = median_of("SALARY_FROM")
+median_to     = median_of("SALARY_TO")
+median_salary = median_of("SALARY")
+
+print("Medians:", median_from, median_to, median_salary)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Average Salary
+
+```python
+# Choose a global fallback for missing salary values
+fallback = next(x for x in [median_salary, median_from, median_to] if x is not None)
+
+df = df.withColumn(
+    "Average_Salary",
+    F.when(F.col("SALARY_FROM").isNotNull() & F.col("SALARY_TO").isNotNull(),
+           (F.col("SALARY_FROM") + F.col("SALARY_TO")) / 2.0
+    ).when(F.col("SALARY").isNotNull(), F.col("SALARY")
+    ).when(F.col("SALARY_FROM").isNotNull(), F.col("SALARY_FROM")
+    ).when(F.col("SALARY_TO").isNotNull(), F.col("SALARY_TO")
+    ).otherwise(F.lit(fallback))
+)
+
+# fill missing bounds for completeness
+df = df.fillna({"SALARY_FROM": median_from, "SALARY_TO": median_to})
+```
+
+
+### Clean Education Field
+
+```python
+# Remove \r and \n, then trim
+df = df.withColumn(
+    "EDUCATION_LEVELS_NAME",
+    F.trim(
+        F.regexp_replace(
+            F.regexp_replace(F.col("EDUCATION_LEVELS_NAME"), r"\r", " "),
+            r"\n", " "
+        )
+    )
+)
+```
+
+### Remote Group
+
+```python
+# Normalize to Remote / Hybrid / Onsite
+df = df.withColumn(
+    "REMOTE_GROUP",
+    F.when(F.col("REMOTE_TYPE_NAME") == "Remote", "Remote")
+     .when(F.col("REMOTE_TYPE_NAME") == "Hybrid", "Hybrid")
+     .otherwise("Onsite")
+)
+```
+
+### Final Check
+
+```python
+df.createOrReplaceTempView("job_postings_clean")
+
+print("Rows retained:", df.count())
+
+df.select("Average_Salary","SALARY","EDUCATION_LEVELS_NAME",
+          "REMOTE_TYPE_NAME","REMOTE_GROUP",
+          "MIN_YEARS_EXPERIENCE","MAX_YEARS_EXPERIENCE") \
+  .show(5, truncate=False)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
