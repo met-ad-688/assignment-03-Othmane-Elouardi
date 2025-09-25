@@ -1,0 +1,9 @@
+---
+title: "Home"
+format: html
+---
+
+# Welcome to Assignment 3
+
+This site contains the full report and analysis for Assignment 3.  
+Use the navigation bar to explore the report and results.

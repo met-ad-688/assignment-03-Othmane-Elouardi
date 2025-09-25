@@ -1,0 +1,24 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Assignment 3"
+  description: "Analysis of salary data and job postings"
+  site-url: https://met-ad-688.github.io/assignment-03-Othmane-Elouardi/
+  navbar:
+    left:
+      - text: Home
+        href: index.qmd
+      - text: Report
+        href: assignment03-othmane.qmd
+    right:
+      - icon: github
+        href: https://github.com/met-ad-688/assignment-03-Othmane-Elouardi
+
+format:
+  html:
+    theme: lux
+    toc: true
+    toc-depth: 3
+
