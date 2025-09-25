@@ -1,7 +1,7 @@
 ---
 title: "Assignment 3"
 subtitle: "Big Data Visualization on Scale"
-author: 
+author:
   - name: "Othmane Elouardi"
     affiliation: "Boston University"
 date: today
@@ -11,18 +11,21 @@ format:
     theme: [lux, styles.scss]
     toc: true
     toc-depth: 3
-    code-copy: true
-    code-overflow: wrap
-    code-fold: true
+    code-fold: false       # hide fold UI
+    code-tools: false      # hide copy/run UI
+    code-copy: false
     highlight-style: github
     title-block-style: default
     title-block-banner: true
     df-print: paged
 execute:
-  echo: true
+  enabled: true            # <-- must be in the header
+  echo: false
   warning: false
   message: false
   freeze: auto
+---
+
 ---
 
 
@@ -219,9 +222,103 @@ df.select("Average_Salary","SALARY","EDUCATION_LEVELS_NAME",
 
 
 
+# Salary Distribution by Industry and Employment Type
+
+In this section, we explore salary variation across industries and employment types:
+
+- **Filter the dataset**
+  - Remove records where **salary is missing or zero**.
+
+- **Aggregate / organize**
+  - Group by **NAICS industry** using `NAICS2_NAME`.
+  - Keep salary values from `SALARY_FROM` (or `Average_Salary` if preferred).
+  - Separate distributions by **employment type** using `EMPLOYMENT_TYPE_NAME`.
+
+- **Visualize results**
+  - Create a **box plot** where:
+    - **X-axis** = `NAICS2_NAME`
+    - **Y-axis** = `SALARY_FROM`
+    - **Color / group** = `EMPLOYMENT_TYPE_NAME`
+  - Customize axis labels, tick angle, margins, and figure size for readability.
 
 
 
 
 
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Salary Distribution by Industry and Employment Type"
 
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import DoubleType
+from pyspark.sql.functions import col
+import plotly.express as px
+from IPython.display import HTML, display
+
+# Reuse Spark session if already started, otherwise create new
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+# Reuse cleaned table if exists, else reload CSV
+if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+    df_use = spark.table("job_postings_clean")
+else:
+    df_use = (
+        spark.read
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .option("multiLine", "true")
+        .option("escape", "\"")
+        .csv("data/lightcast_job_postings.csv")
+        .withColumn("SALARY_FROM", F.col("SALARY_FROM").cast(DoubleType()))
+    )
+
+# Filter and select relevant columns
+plot_sdf = (
+    df_use.filter((col("SALARY_FROM").isNotNull()) & (col("SALARY_FROM") > 0))
+          .select("NAICS2_NAME", "SALARY_FROM", "EMPLOYMENT_TYPE_NAME")
+)
+
+# Convert to pandas for Plotly
+plot_df = plot_sdf.toPandas()
+plot_df["NAICS2_NAME"] = plot_df["NAICS2_NAME"].astype(str).str.replace(r"\s+", " ", regex=True)
+
+# Build Plotly box plot
+fig = px.box(
+    plot_df,
+    x="NAICS2_NAME",
+    y="SALARY_FROM",
+    color="EMPLOYMENT_TYPE_NAME",
+    points="outliers",
+    labels={
+        "NAICS2_NAME": "Industry (NAICS 2-Digit)",
+        "SALARY_FROM": "Salary",
+        "EMPLOYMENT_TYPE_NAME": "Employment Type",
+    },
+    title="Salary Distribution by Industry and Employment Type",
+)
+
+# Make figure larger and more readable
+fig.update_layout(
+    xaxis_title=None,
+    yaxis_title="Salary",
+    margin=dict(l=40, r=40, t=80, b=350),  # more bottom margin
+    boxmode="group",
+    width=2000,   # much wider
+    height=800    # taller
+)
+fig.update_xaxes(tickangle=45)
+
+
+# Render as HTML so it shows on Quarto site
+display(HTML(fig.to_html(include_plotlyjs="cdn", full_html=False)))
+```
+
+
+
+- **Explanation**:
+  “ This box plot shows salary variations by industry and employment type. Full-time positions tend to have higher median salaries and greater variability compared to part-time roles. Outliers, particularly in Construction, Health Care, and Finance, highlight some extremely high or low salaries, providing a clear view of the salary landscape across sectors.”

@@ -199,3 +199,47 @@ def main():
 if __name__ == "__main__":
     main()
 
+##########################################################################################
+
+#Salary Distribution by Industry and Employment Type
+
+#| echo: false
+#| warning: false
+#| message: false
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import DoubleType
+from pyspark.sql.functions import col
+
+# Start/reuse Spark session
+spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+# Reuse cleaned table if available; otherwise load CSV
+if "job_postings_clean" in [t.name for t in spark.catalog.listTables()]:
+    df_use = spark.table("job_postings_clean")
+else:
+    df_use = (
+        spark.read
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .option("multiLine", "true")
+        .option("escape", "\"")
+        .csv("data/lightcast_job_postings.csv")
+        .withColumn("SALARY_FROM", F.col("SALARY_FROM").cast(DoubleType()))
+    )
+
+# Filter rows and select columns needed for analysis
+plot_sdf = (
+    df_use
+    .filter((col("SALARY_FROM").isNotNull()) & (col("SALARY_FROM") > 0))
+    .select("NAICS2_NAME", "SALARY_FROM", "EMPLOYMENT_TYPE_NAME")
+)
+
+# Convert to Pandas for Plotly
+plot_df = plot_sdf.toPandas()
+plot_df["NAICS2_NAME"] = plot_df["NAICS2_NAME"].astype(str).str.replace(r"\s+", " ", regex=True)
+
+
+#########################################################################################################
+
+
