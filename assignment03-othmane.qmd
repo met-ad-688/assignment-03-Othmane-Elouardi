@@ -934,30 +934,3 @@ display(HTML(fig_hist.to_html(include_plotlyjs=False, full_html=False)))
 
 
 
-
-
-
-
-## 1.2.2 Medians
-
-```{python}
-#| echo: false
-#| warning: false
-#| message: false
-
-# Helper to compute median with approxQuantile
-def median_of(colname):
-    vals = df.filter(F.col(colname).isNotNull()) \
-             .approxQuantile(colname, [0.5], 0.001)
-    return float(vals[0]) if vals else None
-
-# Compute medians
-median_from   = median_of("SALARY_FROM")
-median_to     = median_of("SALARY_TO")
-median_salary = median_of("SALARY")
-
-# Nicely formatted output
-print(f"**Medians → SALARY_FROM:** {median_from:,.0f} | "
-      f"**SALARY_TO:** {median_to:,.0f} | "
-      f"**SALARY:** {median_salary:,.0f}")
-```
