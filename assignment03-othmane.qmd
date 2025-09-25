@@ -584,5 +584,141 @@ display(HTML(fig.to_html(include_plotlyjs="cdn", full_html=False)))
 
 
 
+# Salary by Remote Work Type
+
+- Split into three groups based on remote status: **Remote**, **Hybrid**, **Onsite** (includes blank/none).  
+- Plot a **scatter** of `MAX_YEARS_EXPERIENCE` (with jitter) vs `Average_Salary`, colored by remote group.  
+- Also create **salary histograms** for the three groups to compare distributions.  
 
 
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Experience vs Salary by Remote Work Type"
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import DoubleType
+from pyspark.sql.functions import col
+from IPython.display import HTML, display
+import plotly.express as px
+import numpy as np
+
+# --- Spark / source df
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+    df = spark.table("job_postings_clean")
+else:
+    df = (
+        spark.read
+        .option("header", "true").option("inferSchema", "true")
+        .option("multiLine", "true").option("escape", "\"")
+        .csv("data/lightcast_job_postings.csv")
+    )
+
+# --- Experience column
+exp_candidates = ["MAX_YEARS_EXPERIENCE", "YEARS_EXPERIENCE",
+                  "YEARS_OF_EXPERIENCE", "MIN_YEARS_EXPERIENCE"]
+exp_col = next((c for c in exp_candidates if c in df.columns), None)
+if exp_col is None:
+    raise ValueError(f"No experience column found. Tried: {exp_candidates}")
+
+# --- Salary column (prefer Average_Salary)
+if "Average_Salary" in df.columns:
+    sal_col = "Average_Salary"
+else:
+    if "SALARY_FROM" in df.columns and "SALARY_TO" in df.columns:
+        df = df.withColumn(
+            "Average_Salary",
+            (F.col("SALARY_FROM").cast(DoubleType()) + F.col("SALARY_TO").cast(DoubleType())) / 2.0
+        )
+        sal_col = "Average_Salary"
+    elif "SALARY" in df.columns:
+        sal_col = "SALARY"
+    else:
+        raise ValueError("No salary column found (looked for Average_Salary, SALARY_FROM/TO, SALARY).")
+
+df = df.withColumn(sal_col, col(sal_col).cast(DoubleType()))
+
+# --- Remote grouping
+# Use existing REMOTE_GROUP if present; otherwise derive from REMOTE_TYPE_NAME
+if "REMOTE_GROUP" in df.columns:
+    df = df.withColumn("REMOTE_GROUP",
+        F.when(F.col("REMOTE_GROUP").isin("Remote", "Hybrid", "Onsite"), F.col("REMOTE_GROUP"))
+         .otherwise("Onsite")  # treat blanks/others as Onsite
+    )
+elif "REMOTE_TYPE_NAME" in df.columns:
+    df = df.withColumn("REMOTE_GROUP",
+        F.when(F.col("REMOTE_TYPE_NAME") == "Remote", "Remote")
+         .when(F.col("REMOTE_TYPE_NAME") == "Hybrid", "Hybrid")
+         .otherwise("Onsite")
+    )
+else:
+    # if no remote info exists, create a single group to avoid failure
+    df = df.withColumn("REMOTE_GROUP", F.lit("Onsite"))
+
+# --- Optional hover info
+hover_col = None
+for c in ["JOB_TITLE_NAME", "TITLE_RAW", "OCCUPATION_NAME", "JOB_TITLE"]:
+    if c in df.columns:
+        hover_col = c
+        break
+
+# --- Build pandas DF for plots
+cols = [exp_col, sal_col, "REMOTE_GROUP"] + ([hover_col] if hover_col else [])
+pdf = (
+    df.select(*cols)
+      .where(col(sal_col).isNotNull() & (col(sal_col) > 0) & col(exp_col).isNotNull())
+      .toPandas()
+)
+
+# jitter experience to reduce overplotting
+rng = np.random.default_rng(42)
+pdf["exp_jitter"] = pdf[exp_col].astype(float) + rng.uniform(-0.15, 0.15, size=len(pdf))
+pdf = pdf.rename(columns={sal_col: "Average Salary (USD)", "exp_jitter": "Years of Experience"})
+
+# --- Scatter plot
+hover = [hover_col] if hover_col else None
+fig_scatter = px.scatter(
+    pdf,
+    x="Years of Experience",
+    y="Average Salary (USD)",
+    color="REMOTE_GROUP",
+    hover_data=hover,
+    opacity=0.75,
+    title="Experience vs Salary by Remote Work Type"
+)
+fig_scatter.update_layout(
+    legend_title="Remote Work Type",
+    width=1600, height=800,
+    margin=dict(l=40, r=40, t=80, b=120)
+)
+
+# --- Histograms of salary by remote group (faceted)
+fig_hist = px.histogram(
+    pdf,
+    x="Average Salary (USD)",
+    color="REMOTE_GROUP",
+    barmode="overlay",
+    opacity=0.6,
+    facet_col="REMOTE_GROUP",
+    facet_col_spacing=0.06,
+    title="Salary Distribution by Remote Work Type"
+)
+fig_hist.update_layout(
+    width=1600, height=500,
+    margin=dict(l=40, r=40, t=70, b=60),
+    legend_title="Remote Work Type"
+)
+
+# --- Render only charts on the page
+display(HTML(fig_scatter.to_html(include_plotlyjs="cdn", full_html=False)))
+display(HTML(fig_hist.to_html(include_plotlyjs=False, full_html=False)))
+```
+
+
+- **Explanation**: "These charts reveal salary trends across onsite, remote, and hybrid roles. Most salaries cluster between $60k and $150k, but remote roles tend to lean towards the lower end, while onsite positions include more high-paying outliers. Hybrid roles follow a similar pattern. This indicates that remote work status isn’t the main factor influencing salary—job type and experience are likely more significant determinants."
