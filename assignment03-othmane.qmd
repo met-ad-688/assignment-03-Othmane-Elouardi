@@ -322,3 +322,129 @@ display(HTML(fig.to_html(include_plotlyjs="cdn", full_html=False)))
 
 - **Explanation**:
   “ This box plot shows salary variations by industry and employment type. Full-time positions tend to have higher median salaries and greater variability compared to part-time roles. Outliers, particularly in Construction, Health Care, and Finance, highlight some extremely high or low salaries, providing a clear view of the salary landscape across sectors.”
+
+
+
+
+
+
+
+
+# Salary Analysis by ONET Occupation Type (Bubble Chart)
+
+- Analyze how salaries differ across ONET occupation types.  
+- **Aggregate Data**  
+  - Compute median salary for each occupation in the ONET taxonomy.  
+- **Visualize results**  
+  - Create a **bubble chart** where:  
+    - X-axis = `ONET_NAME` (occupation)  
+    - Y-axis = `Median_Salary`  
+    - Bubble size = `Job_Postings` (number of postings)  
+  - Apply custom colors and font styles.  
+
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-cap: "Salary Analysis by Occupation (Auto-selected) – Bubble Chart"
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import DoubleType
+from pyspark.sql.functions import col
+import plotly.express as px
+from IPython.display import HTML, display
+import re
+
+# ---- Spark / source df
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+    base = spark.table("job_postings_clean")
+else:
+    base = (
+        spark.read
+        .option("header", "true").option("inferSchema", "true")
+        .option("multiLine", "true").option("escape", "\"")
+        .csv("data/lightcast_job_postings.csv")
+    )
+
+# ---- Choose salary column
+salary_col = "Average_Salary" if "Average_Salary" in base.columns else (
+    "SALARY_FROM" if "SALARY_FROM" in base.columns else "SALARY"
+)
+df = base.withColumn(salary_col, col(salary_col).cast(DoubleType()))
+
+# ---- Find occupation-like columns and pick the best by distinct count
+pattern = re.compile(r"(ONET|OCCUP|OCC|TITLE).*", re.IGNORECASE)
+occ_candidates = [c for c in df.columns if pattern.match(c)]
+# also include a few common fallbacks explicitly
+for c in ["JOB_TITLE_NAME", "JOB_TITLE", "OCCUPATION_NAME", "OCC_TITLE", "ONET_NAME"]:
+    if c in df.columns and c not in occ_candidates:
+        occ_candidates.append(c)
+
+distinct_counts = []
+for c in occ_candidates:
+    # count non-empty distinct values quickly
+    cnt = (df.where(F.col(c).isNotNull() & (F.length(F.col(c)) > 0))
+             .agg(F.approx_count_distinct(c).alias("n")).collect()[0]["n"])
+    distinct_counts.append((c, cnt))
+
+distinct_counts.sort(key=lambda x: x[1], reverse=True)
+# pick the first with at least 5 distinct values; else fall back to the top one
+occ_col, occ_distinct = (distinct_counts[0] if distinct_counts else (None, 0))
+for c, n in distinct_counts:
+    if n >= 5:
+        occ_col, occ_distinct = c, n
+        break
+
+if not occ_col or occ_distinct <= 1:
+    raise ValueError(
+        f"No suitable occupation column with variety was found. "
+        f"Checked: {distinct_counts}. Your dataset appears to have a single ONET occupation."
+    )
+
+# ---- Clean and explode multi-valued cells (comma/semicolon/pipe)
+clean = df.withColumn(occ_col, F.trim(F.regexp_replace(col(occ_col), r"\s+", " ")))
+split_col = F.split(F.regexp_replace(col(occ_col), r"\s*[,;/|]\s*", "|"), r"\|")
+clean = clean.withColumn("Occupation", F.explode(split_col))
+clean = clean.filter(F.col("Occupation").isNotNull() & (F.length(F.col("Occupation")) > 0))
+
+# ---- Aggregate
+agg = (
+    clean.filter(col(salary_col).isNotNull() & (col(salary_col) > 0))
+         .groupBy("Occupation")
+         .agg(
+             F.percentile_approx(col(salary_col), 0.5, 10000).alias("Median_Salary"),
+             F.count(F.lit(1)).alias("Job_Postings")
+         )
+)
+
+TOP_N = 20
+pdf = (agg.orderBy(F.col("Job_Postings").desc()).limit(TOP_N)).toPandas()
+pdf = pdf.sort_values("Job_Postings", ascending=False)
+
+# ---- Plot
+fig = px.scatter(
+    pdf, x="Occupation", y="Median_Salary",
+    size="Job_Postings", color="Job_Postings",
+    color_continuous_scale="Viridis", size_max=80,
+    hover_name="Occupation",
+    labels={
+        "Occupation": "Occupation Name",
+        "Median_Salary": "Median Salary",
+        "Job_Postings": "Number of Job Postings"
+    },
+    title=f"Salary Analysis by Occupation (Auto: {occ_col}, {occ_distinct} distinct)"
+)
+fig.update_layout(width=1800, height=800, margin=dict(l=40, r=40, t=90, b=320))
+fig.update_xaxes(tickangle=45)
+display(HTML(fig.to_html(include_plotlyjs="cdn", full_html=False)))
+```
+
+- **Explanation**: "This bubble chart illustrates the variation in median salaries across different occupations. The size of each bubble represents the number of job postings available for that role. What stands out from the data is that some positions, like Data Analyst, are in high demand, with a lot of job openings, but they offer moderate salaries. In contrast, more specialized roles, such as Data Engineer and Enterprise Architect, tend to have fewer job postings yet command much higher median salaries. This highlights an interesting trend in the job market where specialization can lead to greater financial rewards, even if the overall demand is lower."
+
+
