@@ -141,6 +141,62 @@ print("Medians:", median_from, median_to, median_salary)
 
 
 
+#### Medians (output)
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+
+from pyspark.sql import SparkSession, functions as F
+
+# Ensure Spark & a DataFrame named `df` are available
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+try:
+    df  # reuse if already defined earlier
+except NameError:
+    if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+        df = spark.table("job_postings_clean")
+    else:
+        df = (
+            spark.read
+            .option("header", "true").option("inferSchema", "true")
+            .option("multiLine", "true").option("escape", "\"")
+            .csv("data/lightcast_job_postings.csv")
+        )
+
+# Helper to compute median with approxQuantile (returns None if column missing)
+def median_of(colname):
+    if colname not in df.columns:
+        return None
+    vals = df.filter(F.col(colname).isNotNull()).approxQuantile(colname, [0.5], 0.001)
+    return float(vals[0]) if vals else None
+
+# Compute medians
+median_from   = median_of("SALARY_FROM")
+median_to     = median_of("SALARY_TO")
+median_salary = median_of("SALARY")
+
+# Nicely formatted output (only text appears on page)
+from IPython.display import display, HTML
+html = f"""
+<div style="font-size:1rem; line-height:1.6;">
+  <strong>Medians</strong>
+  <ul style="margin:0.25rem 0 0 1.25rem;">
+    <li>SALARY_FROM: {median_from:,.0f}</li>
+    <li>SALARY_TO: {median_to:,.0f}</li>
+    <li>SALARY: {median_salary:,.0f}</li>
+  </ul>
+</div>
+"""
+display(HTML(html))
+```
+
+
 
 
 
@@ -172,6 +228,77 @@ df = df.fillna({"SALARY_FROM": median_from, "SALARY_TO": median_to})
 ```
 
 
+#### Average Salary (output)
+
+
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+
+from pyspark.sql import SparkSession, functions as F
+from IPython.display import display, HTML
+
+# Ensure Spark & df exist
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+try:
+    df  # reuse if defined earlier
+except NameError:
+    if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+        df = spark.table("job_postings_clean")
+    else:
+        df = (
+            spark.read
+            .option("header", "true").option("inferSchema", "true")
+            .option("multiLine", "true").option("escape", "\"")
+            .csv("data/lightcast_job_postings.csv")
+        )
+
+# Helper to compute median if we need to rebuild fallback
+def _median_of(colname):
+    if colname not in df.columns:
+        return None
+    vals = df.filter(F.col(colname).isNotNull()) \
+             .approxQuantile(colname, [0.5], 0.001)
+    return float(vals[0]) if vals else None
+
+# Use existing `fallback` if present; otherwise rebuild it exactly like before
+try:
+    avg_value = float(fallback)
+except NameError:
+    median_from   = _median_of("SALARY_FROM")
+    median_to     = _median_of("SALARY_TO")
+    median_salary = _median_of("SALARY")
+    # same selection rule as your pipeline
+    for x in (median_salary, median_from, median_to):
+        if x is not None:
+            avg_value = x
+            break
+    else:
+        avg_value = None  # if everything missing
+
+# Render result (text only)
+if avg_value is None:
+    display(HTML("<em>Average Salary could not be determined from the available fields.</em>"))
+else:
+    display(HTML(f"""
+    <div style="font-size:1rem; line-height:1.6;">
+      <strong>Average Salary</strong>: {avg_value:,.0f} USD
+    </div>
+    """))
+```
+
+
+
+
+
+
+
 ### Clean Education Field
 
 ```python
@@ -187,6 +314,84 @@ df = df.withColumn(
 )
 ```
 
+
+#### Clean Education Field (output)
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.functions import col
+from IPython.display import display, HTML
+
+# Ensure Spark & df exist
+try:
+    spark
+except NameError:
+    spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+try:
+    df
+except NameError:
+    if any(t.name == "job_postings_clean" for t in spark.catalog.listTables()):
+        df = spark.table("job_postings_clean")
+    else:
+        df = (
+            spark.read
+            .option("header", "true").option("inferSchema", "true")
+            .option("multiLine", "true").option("escape", "\"")
+            .csv("data/lightcast_job_postings.csv")
+        )
+
+colname = "EDUCATION_LEVELS_NAME"
+
+if colname not in df.columns:
+    display(HTML("<em>EDUCATION_LEVELS_NAME column not found — nothing to summarize.</em>"))
+else:
+    total_rows = df.count()
+    # blanks or nulls *after* cleaning step
+    blanks = (
+        df.filter( (col(colname).isNull()) | (F.trim(col(colname)) == "") )
+          .count()
+    )
+
+    # Top 10 education labels
+    top_pdf = (
+        df.groupBy(colname).count()
+          .orderBy(F.desc("count"))
+          .limit(10)
+          .toPandas()
+    )
+
+    # Build HTML
+    header = f"""
+    <div style="font-size:1rem; line-height:1.6; margin-bottom:.5rem;">
+      <strong>Education Field Summary (post-clean)</strong><br/>
+      Total rows: {total_rows:,} • Blank/Null: {blanks:,}
+    </div>
+    """
+
+    # Simple table
+    if len(top_pdf) > 0:
+        # pretty format
+        top_pdf.columns = ["Education Level", "Count"]
+        top_pdf["Count"] = top_pdf["Count"].map(lambda x: f"{x:,}")
+        table_html = top_pdf.to_html(index=False, border=0)
+        display(HTML(header + table_html))
+    else:
+        display(HTML(header + "<em>No non-empty education values found.</em>"))
+```
+
+
+
+
+
+
+
+
+
 ### Remote Group
 
 ```python
@@ -198,6 +403,9 @@ df = df.withColumn(
      .otherwise("Onsite")
 )
 ```
+
+
+
 
 ### Final Check
 
@@ -722,3 +930,34 @@ display(HTML(fig_hist.to_html(include_plotlyjs=False, full_html=False)))
 
 
 - **Explanation**: "These charts reveal salary trends across onsite, remote, and hybrid roles. Most salaries cluster between $60k and $150k, but remote roles tend to lean towards the lower end, while onsite positions include more high-paying outliers. Hybrid roles follow a similar pattern. This indicates that remote work status isn’t the main factor influencing salary—job type and experience are likely more significant determinants."
+
+
+
+
+
+
+
+
+## 1.2.2 Medians
+
+```{python}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Helper to compute median with approxQuantile
+def median_of(colname):
+    vals = df.filter(F.col(colname).isNotNull()) \
+             .approxQuantile(colname, [0.5], 0.001)
+    return float(vals[0]) if vals else None
+
+# Compute medians
+median_from   = median_of("SALARY_FROM")
+median_to     = median_of("SALARY_TO")
+median_salary = median_of("SALARY")
+
+# Nicely formatted output
+print(f"**Medians → SALARY_FROM:** {median_from:,.0f} | "
+      f"**SALARY_TO:** {median_to:,.0f} | "
+      f"**SALARY:** {median_salary:,.0f}")
+```
